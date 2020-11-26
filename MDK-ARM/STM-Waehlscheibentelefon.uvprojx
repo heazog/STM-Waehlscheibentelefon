@@ -10,6 +10,7 @@
       <TargetName>STM-Waehlscheibentelefon</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
+      <pCCUsed>5060750::V5.06 update 6 (build 750)::.\ARMCC</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
@@ -390,9 +391,6 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>::CMSIS</GroupName>
-        </Group>
-        <Group>
           <GroupName>Application/User/Core</GroupName>
           <Files>
             <File>
@@ -409,6 +407,16 @@
               <FileName>stm32l4xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32l4xx_hal_msp.c</FilePath>
+            </File>
+            <File>
+              <FileName>dial.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\dial.c</FilePath>
+            </File>
+            <File>
+              <FileName>fona.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\fona.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -521,6 +529,9 @@
               <FilePath>../Core/Src/system_stm32l4xx.c</FilePath>
             </File>
           </Files>
+        </Group>
+        <Group>
+          <GroupName>::CMSIS</GroupName>
         </Group>
       </Groups>
     </Target>

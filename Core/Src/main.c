@@ -23,41 +23,47 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "fona.h"
+#include "dial.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+typedef enum {NO, RISING, FALLING} tEdge;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DEBOUNCE_BUTTON 100
+#define DEBOUNCE_ROTARY 80
+#define MYNUMBER "0664XXXXXXX" // <- auf deine Telefonnummer ändern! (nicht die im Modul, sondern eine weiter zum Testen)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
-
-UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
-
+static uint8_t rxPC;
+static bool received = false;
+static bool inCall = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_USART1_UART_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+static void procAlwaysON(void);
+static void procRing(void);
+static void procUserControl(void);
+static void procDial(void);
+static void procCall(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -94,22 +100,35 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM1_Init();
-  MX_USART1_UART_Init();
   MX_USART2_UART_Init();
+  
   /* USER CODE BEGIN 2 */
+	
+	HAL_UART_Transmit(&huart2, (uint8_t*)"Hallo!\r\n", 8, 1000);
+	HAL_UART_Receive_IT(&huart2, &rxPC, 1);
 
+	fona_init();
+	fona_ringVolume(0);
+	
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+		procAlwaysON();
+		procUserControl();
+		procDial();
+		procRing();
+		procCall();
+		
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
+
 
 /**
   * @brief System Clock Configuration
@@ -186,6 +205,7 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
   TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
@@ -200,6 +220,15 @@ static void MX_TIM1_Init(void)
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
   {
     Error_Handler();
@@ -222,7 +251,6 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
@@ -250,40 +278,6 @@ static void MX_TIM1_Init(void)
 
 }
 
-/**
-  * @brief USART1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
 
 /**
   * @brief USART2 Initialization Function
@@ -336,25 +330,56 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(FONA_KEY_GPIO_Port, FONA_KEY_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : PA11 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  /*Configure GPIO pin : PA11 = RI */
+  GPIO_InitStruct.Pin = RI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(RI_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LD3_Pin */
+  /*Configure GPIO pin : LD3_Pin = LED */
   GPIO_InitStruct.Pin = LD3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD3_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB4 PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_4|GPIO_PIN_5;
+  /*Configure GPIO pins : PB4 = Scheibe CNT */
+  GPIO_InitStruct.Pin = ROTARY_CNT_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(ROTARY_CNT_GPIO_Port, &GPIO_InitStruct);
+	
+  /*Configure GPIO pins : PB5 = Scheibe Start/Stop */
+  GPIO_InitStruct.Pin = ROTARY_SEQ_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(ROTARY_SEQ_GPIO_Port, &GPIO_InitStruct);
+	
+  /*Configure GPIO pin : PA14 = PS */
+  GPIO_InitStruct.Pin = PS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(PS_GPIO_Port, &GPIO_InitStruct);
+	
+  /*Configure GPIO pin : PA15 = KEY */
+  GPIO_InitStruct.Pin = FONA_KEY_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(FONA_KEY_GPIO_Port, &GPIO_InitStruct);
+	
+
+  GPIO_InitStruct.Pin = PICKUP_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(PICKUP_GPIO_Port, &GPIO_InitStruct);
+	
+
+  GPIO_InitStruct.Pin = BUTTON_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BUTTON_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
@@ -369,6 +394,161 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+	if(huart==&huart2){
+		HAL_UART_Transmit(&huart2, &rxPC, 1, 10);
+		
+		received = true;
+		
+		
+		
+		HAL_UART_Receive_IT(&huart2, &rxPC, 1);
+	}
+}
+
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+	static uint32_t lastDialStartStop = 0;
+	static uint32_t lastDialCount = 0;
+	
+	static bool start = true;
+	
+	switch(GPIO_Pin){
+		case ROTARY_CNT_Pin:
+			if(HAL_GetTick() > (lastDialCount + DEBOUNCE_ROTARY)){
+				lastDialCount = HAL_GetTick();
+				dial_count();
+			}
+			break;
+		case ROTARY_SEQ_Pin:
+			if(HAL_GetTick() > (lastDialStartStop + DEBOUNCE_ROTARY)){
+				lastDialStartStop = HAL_GetTick();
+				if(start){ // rising edge (Beenden)
+					dial_start();
+					start = false;
+				}else{ // falling edge (Starten)
+					dial_stop();
+					start = true;
+				}
+			}
+			break;
+		default:
+			break;
+	}
+}
+
+static void procDial(void){
+	char buf[MAX_DIGITS+1] = {0};
+	if(dial_getNumber(buf)){
+		fona_call(buf);
+		fona_sms(MYNUMBER,buf);
+		inCall = true;
+	}
+}
+
+static void procUserControl(void){
+	if(received == true){
+			received = false;
+			switch(rxPC){
+				case '1': 
+					fona_voiceVolume(50);
+					break;
+				case '2': 
+					fona_ringVolume(0);
+					break;
+				case '3':
+					fona_call(MYNUMBER);
+					break;
+				case '4': 
+					fona_hangUp();
+					break;
+				case '5':
+					fona_sms(MYNUMBER,"test :)");
+					break;
+				case '6': 
+					fona_pickUp();
+					break;
+				default: break;
+			}
+		}
+}
+
+
+static void procRing(void){
+	static GPIO_PinState oldRing = GPIO_PIN_RESET;
+	GPIO_PinState newRing = HAL_GPIO_ReadPin(RI_GPIO_Port, RI_Pin);
+	
+	if(newRing != oldRing){
+		oldRing = newRing;
+		if(newRing == GPIO_PIN_RESET){ // einkommender anruf
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1);
+			HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2);
+		}else{ // kein anruf mehr
+			HAL_TIM_PWM_Stop(&htim1,TIM_CHANNEL_1);
+			HAL_TIM_PWM_Stop(&htim1,TIM_CHANNEL_2);
+		}
+	}
+}
+
+static void procAlwaysON(void){
+	static enum{CHECK, TURN_ON} state = CHECK;
+	static uint32_t startTime = 0;
+	
+	switch(state){
+		case CHECK:
+			if(HAL_GPIO_ReadPin(PS_GPIO_Port, PS_Pin) == GPIO_PIN_RESET){
+				state = TURN_ON;
+				HAL_GPIO_WritePin(FONA_KEY_GPIO_Port, FONA_KEY_Pin, GPIO_PIN_RESET);
+				startTime = HAL_GetTick();
+			}
+			break;
+		case TURN_ON: // set KEY LOW for 2 seconds
+			if(HAL_GetTick() >= (startTime + 2000)){
+				state = CHECK;
+				HAL_GPIO_WritePin(FONA_KEY_GPIO_Port, FONA_KEY_Pin, GPIO_PIN_SET);
+			}
+			break;
+	}
+	
+}
+
+tEdge getPickUpButton(void){
+	static GPIO_PinState oldPickup = GPIO_PIN_RESET;
+	GPIO_PinState newPickup = HAL_GPIO_ReadPin(PICKUP_GPIO_Port, PICKUP_Pin);
+	static uint32_t lastTime = 0;
+	if((HAL_GetTick()-lastTime) >= DEBOUNCE_BUTTON){
+		lastTime = HAL_GetTick();
+		if(newPickup != oldPickup){
+			oldPickup = newPickup;
+			if(newPickup == GPIO_PIN_SET){
+				return RISING;
+			}else{
+				return FALLING;
+			}
+		}
+	}
+	return NO;
+}
+
+void procCall(void){
+	switch(getPickUpButton()){
+		case RISING:
+			if(HAL_GPIO_ReadPin(RI_GPIO_Port, RI_Pin) == GPIO_PIN_RESET){
+				fona_pickUp();
+				inCall = true;
+			}
+			break;
+		case FALLING:
+			if(inCall){
+				fona_hangUp();
+			}
+			inCall = false;
+			break;
+		case NO: break;
+	}
+}
+
 
 /* USER CODE END 4 */
 

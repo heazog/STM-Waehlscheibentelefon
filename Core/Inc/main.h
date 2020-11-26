@@ -74,6 +74,20 @@ void Error_Handler(void);
 #define LD3_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
+#define RI_Pin GPIO_PIN_11
+#define RI_GPIO_Port GPIOA
+#define ROTARY_CNT_Pin GPIO_PIN_4
+#define ROTARY_CNT_GPIO_Port GPIOB
+#define ROTARY_SEQ_Pin GPIO_PIN_5
+#define ROTARY_SEQ_GPIO_Port GPIOB
+#define PS_Pin GPIO_PIN_14
+#define PS_GPIO_Port GPIOA
+#define FONA_KEY_Pin GPIO_PIN_15
+#define FONA_KEY_GPIO_Port GPIOA
+#define PICKUP_Pin GPIO_PIN_0
+#define PICKUP_GPIO_Port GPIOB
+#define BUTTON_Pin GPIO_PIN_7
+#define BUTTON_GPIO_Port GPIOB
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
